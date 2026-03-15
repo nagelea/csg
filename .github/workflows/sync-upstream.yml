@@ -1,0 +1,65 @@
+name: Sync Upstream Repo
+
+on:
+  schedule:
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout current repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Configure Git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Add and fetch upstream
+        run: |
+          git remote add upstream https://github.com/libaxuan/cursor2api-go.git
+          git fetch upstream main
+
+      - name: Check if upstream has new commits
+        id: check
+        run: |
+          UPSTREAM_SHA=$(git rev-parse upstream/main)
+          LOCAL_SHA=$(git rev-parse HEAD)
+          echo "upstream_sha=$UPSTREAM_SHA" >> "$GITHUB_OUTPUT"
+          echo "local_sha=$LOCAL_SHA" >> "$GITHUB_OUTPUT"
+
+          if [ "$UPSTREAM_SHA" = "$LOCAL_SHA" ]; then
+            echo "has_update=false" >> "$GITHUB_OUTPUT"
+            echo "can_fast_forward=false" >> "$GITHUB_OUTPUT"
+            echo "No upstream updates."
+          elif git merge-base --is-ancestor "$LOCAL_SHA" "$UPSTREAM_SHA"; then
+            echo "has_update=true" >> "$GITHUB_OUTPUT"
+            echo "can_fast_forward=true" >> "$GITHUB_OUTPUT"
+            echo "Upstream has fast-forward updates."
+          else
+            echo "has_update=true" >> "$GITHUB_OUTPUT"
+            echo "can_fast_forward=false" >> "$GITHUB_OUTPUT"
+            echo "Upstream differs, but cannot fast-forward safely."
+          fi
+
+      - name: Sync from upstream (fast-forward only)
+        if: steps.check.outputs.can_fast_forward == 'true'
+        run: |
+          git checkout main
+          git merge --ff-only upstream/main
+          git push origin main
+
+      - name: Summary
+        run: |
+          echo "Local:    ${{ steps.check.outputs.local_sha }}"
+          echo "Upstream: ${{ steps.check.outputs.upstream_sha }}"
+          echo "Updated:  ${{ steps.check.outputs.has_update }}"
+          echo "Fast-forward possible: ${{ steps.check.outputs.can_fast_forward }}"
